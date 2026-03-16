@@ -48,6 +48,9 @@ import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
 import { decodeDataUrl } from "@/util/data-url"
+import { Telemetry } from "@/rpc/telemetry"
+import { IntelligenceClient } from "@/rpc/client"
+import { executeToolCommand } from "@/rpc/dispatcher"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -299,33 +302,25 @@ export namespace SessionPrompt {
     if (process.env.INTELLIGENCE_ENGINE) {
       console.log('[INTELLIGENCE ENGINE] Starting Predictive Planning Loop for session:', sessionID)
       try {
-        const { Telemetry } = require('../rpc/telemetry')
-        const { IntelligenceClient } = require('../rpc/client')
-        const { executeToolCommand } = require('../rpc/dispatcher')
-        
         const client = new IntelligenceClient()
-        
-      // Get the latest user prompt
-      let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
-      let lastUser = msgs.slice().reverse().find((m: any) => m.info.role === 'user')
-      const promptText = lastUser?.parts.find((p: any) => p.type === 'text')
-      const actualText = promptText ? (promptText as any).text : 'Unknown task'
-      
-      // 1. Harvest state and stream telemetry
-      console.log('[INTELLIGENCE ENGINE] Harvesting telemetry state...')
-      const telemetryState = await Telemetry.harvest(sessionID, actualText)
-      await client.streamTelemetry(telemetryState)
-      
-      // 2. Await strictly formatted execution commands
-      console.log('[INTELLIGENCE ENGINE] Waiting for Execution Commands...')
-      await client.streamCommands(async (cmd: any) => {
-        console.log('[INTELLIGENCE ENGINE] Received Command:', cmd.command)
-        return executeToolCommand({ sessionID, cmd })
-      })
-      
-    } catch (e) {
-      console.error('[INTELLIGENCE ENGINE] Error:', e)
-    }
+
+        const messages = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
+        const lastUser = [...messages].reverse().find((message) => message.info.role === "user")
+        const promptPart = lastUser?.parts.find((part) => part.type === "text")
+        const promptText = promptPart?.type === "text" ? promptPart.text : "Unknown task"
+
+        console.log("[INTELLIGENCE ENGINE] Harvesting telemetry state...")
+        const telemetryState = await Telemetry.harvest(sessionID, promptText)
+        await client.streamTelemetry(telemetryState)
+
+        console.log("[INTELLIGENCE ENGINE] Waiting for Execution Commands...")
+        await client.streamCommands(async (cmd) => {
+          console.log("[INTELLIGENCE ENGINE] Received Command:", cmd.command)
+          return executeToolCommand({ sessionID, cmd })
+        })
+      } catch (e) {
+        console.error('[INTELLIGENCE ENGINE] Error:', e)
+      }
     return new Promise<MessageV2.WithParts>(() => {})
   }
 
