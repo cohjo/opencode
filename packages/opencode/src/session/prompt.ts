@@ -294,7 +294,51 @@ export namespace SessionPrompt {
 
     let step = 0
     const session = await Session.get(sessionID)
-    while (true) {
+
+    // INTEGRATION: SOTA Coding Agent Intelligence Engine
+    if (process.env.INTELLIGENCE_ENGINE) {
+      console.log('[INTELLIGENCE ENGINE] Starting Predictive Planning Loop for session:', sessionID)
+      try {
+        const { Telemetry } = require('../rpc/telemetry')
+        const { IntelligenceClient } = require('../rpc/client')
+        
+        const client = new IntelligenceClient()
+        
+      // Get the latest user prompt
+      let msgs = await MessageV2.filterCompacted(MessageV2.stream(sessionID))
+      let lastUser = msgs.slice().reverse().find((m: any) => m.info.role === 'user')
+      const promptText = lastUser?.parts.find((p: any) => p.type === 'text')
+      const actualText = promptText ? (promptText as any).text : 'Unknown task'
+      
+      // 1. Harvest state and stream telemetry
+      console.log('[INTELLIGENCE ENGINE] Harvesting telemetry state...')
+      const telemetryState = await Telemetry.harvest(sessionID, actualText)
+      await client.streamTelemetry(telemetryState)
+      
+      // 2. Await strictly formatted execution commands
+      console.log('[INTELLIGENCE ENGINE] Waiting for Execution Commands...')
+      await new Promise<void>((resolve, reject) => {
+        client.streamCommands(async (cmd: any) => {
+           console.log('[INTELLIGENCE ENGINE] Received Command:', cmd.command)
+           // For now, we simulate execution
+           return {
+             session_id: sessionID,
+             command_id: cmd.command_id,
+             success: true,
+             output: 'Command executed successfully by TS shell',
+             error: ''
+           }
+        })
+      })
+      
+    } catch (e) {
+      console.error('[INTELLIGENCE ENGINE] Error:', e)
+    }
+    // Just hang indefinitely for now
+    await new Promise(() => {})
+  }
+
+  while (true) {
       SessionStatus.set(sessionID, { type: "busy" })
       log.info("loop", { step, sessionID })
       if (abort.aborted) break

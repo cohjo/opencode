@@ -1,7 +1,7 @@
 import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
 import path from 'path'
-import { ProtoGrpcType } from './agent'
+import type { ProtoGrpcType } from './agent'
 
 const PROTO_PATH = path.join(import.meta.dir, 'agent.proto')
 
@@ -39,6 +39,46 @@ export class IntelligenceClient {
           resolve(response.message)
         }
       })
+    })
+  }
+
+  streamTelemetry(state: any): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const call = this.telemetryClient.StreamTelemetry((error: grpc.ServiceError | null, response: any) => {
+        if (error) {
+          reject(error)
+        } else {
+          resolve(response.success)
+        }
+      })
+      call.write(state)
+      call.end()
+    })
+  }
+
+  streamCommands(onCommand: (cmd: any) => Promise<any>): void {
+    const call = this.executionClient.StreamCommands()
+
+    call.on('data', async (cmd: any) => {
+      try {
+        const result = await onCommand(cmd)
+        call.write(result)
+      } catch (err: any) {
+        call.write({
+          session_id: cmd.session_id,
+          command_id: cmd.command_id,
+          success: false,
+          error: err.message || String(err)
+        })
+      }
+    })
+
+    call.on('error', (err: any) => {
+      console.error('Execution stream error:', err)
+    })
+
+    call.on('end', () => {
+      console.log('Execution stream ended')
     })
   }
 }
