@@ -1,0 +1,77 @@
+syntax = "proto3";
+package intelligence.agent;
+
+// --- Telemetry Service (TS -> Python) ---
+// Used for the initial burst of context when a user hits "Enter"
+service TelemetryService {
+  rpc Ping(PingRequest) returns (PingResponse);
+  rpc StreamTelemetry(stream TelemetryState) returns (TelemetryResponse);
+}
+
+message PingRequest {
+  string message = 1;
+}
+
+message PingResponse {
+  string message = 1;
+}
+
+message TelemetryState {
+  string session_id = 1;
+  string user_prompt = 2;          // CRITICAL: What the human actually asked for
+  string cwd = 3;
+  string terminal_stdout = 4;
+  repeated LspDiagnostic lsp_diagnostics = 5;
+  string file_tree = 6;
+  string uncommitted_diffs = 7;    // CRITICAL: The dirty state of the editor
+}
+
+message LspDiagnostic {
+  string file = 1;
+  string message = 2;
+  int32 line = 3;
+  string severity = 4;             // Distinguish between ERROR and WARNING
+}
+
+message TelemetryResponse {
+  bool success = 1;
+}
+
+// --- Execution Service (Python <-> TS) ---
+// Bi-directional: Python sends a command, TS executes it and streams back the result
+service ExecutionService {
+  rpc StreamCommands(stream CommandResult) returns (stream ToolCommand);
+}
+
+// Sent from Python -> TS
+message ToolCommand {
+  string command_id = 1;           // Track which command this is
+  oneof command {
+    ExecuteBash execute_bash = 2;
+    ApplyPatch apply_patch = 3;
+    ReadFile read_file = 4;        // Let the brain peek at files
+  }
+}
+
+message ExecuteBash {
+  string command = 1;
+  string workdir = 2;
+}
+
+message ApplyPatch {
+  string file_path = 1;
+  string patch_content = 2;
+}
+
+message ReadFile {
+  string file_path = 1;
+}
+
+// Sent from TS -> Python
+message CommandResult {
+  string session_id = 1;
+  string command_id = 2;           // Matches the ID sent in ToolCommand
+  bool success = 3;
+  string output = 4;               // stdout or file content
+  string error = 5;                // stderr if the command failed
+}
