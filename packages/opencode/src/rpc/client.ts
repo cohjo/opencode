@@ -56,29 +56,34 @@ export class IntelligenceClient {
     })
   }
 
-  streamCommands(onCommand: (cmd: any) => Promise<any>): void {
+  streamCommands(onCommand: (cmd: any) => Promise<any>): Promise<void> {
     const call = this.executionClient.StreamCommands()
 
-    call.on('data', async (cmd: any) => {
-      try {
-        const result = await onCommand(cmd)
-        call.write(result)
-      } catch (err: any) {
-        call.write({
-          session_id: cmd.session_id,
-          command_id: cmd.command_id,
-          success: false,
-          error: err.message || String(err)
-        })
-      }
-    })
+    return new Promise((resolve, reject) => {
+      call.on('data', async (cmd: any) => {
+        try {
+          const result = await onCommand(cmd)
+          call.write(result)
+        } catch (err: any) {
+          call.write({
+            session_id: cmd.session_id,
+            command_id: cmd.command_id,
+            success: false,
+            output: '',
+            error: err.message || String(err),
+          })
+        }
+      })
 
-    call.on('error', (err: any) => {
-      console.error('Execution stream error:', err)
-    })
+      call.on('error', (err: any) => {
+        console.error('Execution stream error:', err)
+        reject(err)
+      })
 
-    call.on('end', () => {
-      console.log('Execution stream ended')
+      call.on('end', () => {
+        console.log('Execution stream ended')
+        resolve()
+      })
     })
   }
 }

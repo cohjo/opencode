@@ -301,6 +301,7 @@ export namespace SessionPrompt {
       try {
         const { Telemetry } = require('../rpc/telemetry')
         const { IntelligenceClient } = require('../rpc/client')
+        const { executeToolCommand } = require('../rpc/dispatcher')
         
         const client = new IntelligenceClient()
         
@@ -317,25 +318,15 @@ export namespace SessionPrompt {
       
       // 2. Await strictly formatted execution commands
       console.log('[INTELLIGENCE ENGINE] Waiting for Execution Commands...')
-      await new Promise<void>((resolve, reject) => {
-        client.streamCommands(async (cmd: any) => {
-           console.log('[INTELLIGENCE ENGINE] Received Command:', cmd.command)
-           // For now, we simulate execution
-           return {
-             session_id: sessionID,
-             command_id: cmd.command_id,
-             success: true,
-             output: 'Command executed successfully by TS shell',
-             error: ''
-           }
-        })
+      await client.streamCommands(async (cmd: any) => {
+        console.log('[INTELLIGENCE ENGINE] Received Command:', cmd.command)
+        return executeToolCommand({ sessionID, cmd })
       })
       
     } catch (e) {
       console.error('[INTELLIGENCE ENGINE] Error:', e)
     }
-    // Just hang indefinitely for now
-    await new Promise(() => {})
+    return new Promise<MessageV2.WithParts>(() => {})
   }
 
   while (true) {

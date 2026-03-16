@@ -1,5 +1,6 @@
 import { IntelligenceClient } from './client'
 import { Telemetry } from './telemetry'
+import { executeToolCommand } from './dispatcher'
 
 async function main() {
   const client = new IntelligenceClient()
@@ -15,15 +16,9 @@ async function main() {
     console.log('StreamTelemetry success:', success)
 
     console.log('Starting StreamCommands...')
-    client.streamCommands(async (cmd) => {
+    await client.streamCommands(async (cmd) => {
       console.log('Received command:', cmd)
-      return {
-        session_id: 'test-session',
-        command_id: cmd.command_id,
-        success: true,
-        output: 'Simulated output',
-        error: ''
-      }
+      return executeToolCommand({ sessionID: 'test-session', cmd })
     })
   } catch (error) {
     console.error('Error:', error)
