@@ -2,26 +2,19 @@ import { exec } from "child_process"
 import fs from "fs/promises"
 import path from "path"
 import { promisify } from "util"
+import type { CommandResultWire, ToolCommandWire } from "./types"
 
 const execAsync = promisify(exec)
 
-type CommandResult = {
-  session_id: string
-  command_id: string
-  success: boolean
-  output: string
-  error: string
-}
-
-export async function executeToolCommand(input: { sessionID: string; cmd: any }): Promise<CommandResult> {
+export async function executeToolCommand(input: { sessionID: string; cmd: ToolCommandWire }): Promise<CommandResultWire> {
   const sessionID = input.sessionID
   const cmd = input.cmd
-  const commandID = cmd.command_id ?? cmd.commandId ?? ""
+  const commandID = cmd.command_id ?? ""
   const commandKind = cmd.command ?? ""
 
   try {
-    if (commandKind === "execute_bash" || commandKind === "executeBash") {
-      const payload = cmd.execute_bash ?? cmd.executeBash ?? {}
+    if (commandKind === "execute_bash") {
+      const payload = cmd.execute_bash ?? {}
       const command = payload.command ?? ""
       const workdir = payload.workdir ?? "."
       const cwd = path.isAbsolute(workdir) ? workdir : path.resolve(process.cwd(), workdir)
@@ -40,10 +33,10 @@ export async function executeToolCommand(input: { sessionID: string; cmd: any })
       }
     }
 
-    if (commandKind === "apply_patch" || commandKind === "applyPatch") {
-      const payload = cmd.apply_patch ?? cmd.applyPatch ?? {}
-      const filePath = payload.file_path ?? payload.filePath
-      const patchContent = payload.patch_content ?? payload.patchContent ?? ""
+    if (commandKind === "apply_patch") {
+      const payload = cmd.apply_patch ?? {}
+      const filePath = payload.file_path
+      const patchContent = payload.patch_content ?? ""
       if (!filePath) throw new Error("apply_patch missing file_path")
 
       const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
@@ -59,9 +52,9 @@ export async function executeToolCommand(input: { sessionID: string; cmd: any })
       }
     }
 
-    if (commandKind === "read_file" || commandKind === "readFile") {
-      const payload = cmd.read_file ?? cmd.readFile ?? {}
-      const filePath = payload.file_path ?? payload.filePath
+    if (commandKind === "read_file") {
+      const payload = cmd.read_file ?? {}
+      const filePath = payload.file_path
       if (!filePath) throw new Error("read_file missing file_path")
 
       const absolutePath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath)
@@ -77,13 +70,14 @@ export async function executeToolCommand(input: { sessionID: string; cmd: any })
     }
 
     throw new Error(`Unsupported command type: ${commandKind}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const err = error as { stdout?: string; stderr?: string; message?: string }
     return {
       session_id: sessionID,
       command_id: commandID,
       success: false,
-      output: `${error?.stdout ?? ""}${error?.stderr ?? ""}`.trim(),
-      error: error?.message ?? String(error),
+      output: `${err.stdout ?? ""}${err.stderr ?? ""}`.trim(),
+      error: err.message ?? String(error),
     }
   }
 }
