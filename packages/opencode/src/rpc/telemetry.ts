@@ -42,7 +42,7 @@ export class Telemetry {
 
     const tracker = Telemetry.getTracker()
     tracker.ensureSubscribed(cwd)
-    const deltas = tracker.consume(cwd)
+    const deltas = tracker.snapshot(cwd)
 
     let fileTree = ''
     try {
@@ -63,6 +63,15 @@ export class Telemetry {
     }
   }
 
+  static markDelivered(state: TelemetryStateWire): void {
+    const tracker = Telemetry.getTracker()
+    tracker.acknowledge(
+      state.cwd,
+      state.changed_files,
+      state.removed_files,
+    )
+  }
+
   private static getTracker(): TelemetryDeltaTracker {
     if (!Telemetry.tracker) {
       Telemetry.tracker = new TelemetryDeltaTracker()
@@ -81,8 +90,8 @@ function mapDiagnostic(filePath: string, diagnostic: LSPClient.Diagnostic): LspD
 }
 
 class TelemetryDeltaTracker {
-  private changed = new Set<string>()
-  private removed = new Set<string>()
+  private changedByCwd = new Map<string, Set<string>>()
+  private removedByCwd = new Map<string, Set<string>>()
   private subscribed = false
 
   ensureSubscribed(cwd: string): void {
@@ -91,20 +100,24 @@ class TelemetryDeltaTracker {
       Bus.subscribe(FileWatcher.Event.Updated, ({ properties }) => {
         const rel = this.toRelative(cwd, properties.file)
         if (!rel) return
+        const changed = this.getChangedSet(cwd)
+        const removed = this.getRemovedSet(cwd)
         if (properties.event === 'unlink') {
-          this.changed.delete(rel)
-          this.removed.add(rel)
+          changed.delete(rel)
+          removed.add(rel)
           return
         }
-        this.removed.delete(rel)
-        this.changed.add(rel)
+        removed.delete(rel)
+        changed.add(rel)
       })
 
       Bus.subscribe(LSPClient.Event.Diagnostics, ({ properties }) => {
         const rel = this.toRelative(cwd, properties.path)
         if (!rel) return
-        this.removed.delete(rel)
-        this.changed.add(rel)
+        const changed = this.getChangedSet(cwd)
+        const removed = this.getRemovedSet(cwd)
+        removed.delete(rel)
+        changed.add(rel)
       })
 
       this.subscribed = true
@@ -113,12 +126,41 @@ class TelemetryDeltaTracker {
     }
   }
 
-  consume(cwd: string): { changedFiles: string[]; removedFiles: string[] } {
-    const changedFiles = [...this.changed].filter((file) => this.isWithinCwd(cwd, file))
-    const removedFiles = [...this.removed].filter((file) => this.isWithinCwd(cwd, file))
-    this.changed.clear()
-    this.removed.clear()
+  snapshot(cwd: string): { changedFiles: string[]; removedFiles: string[] } {
+    const changedFiles = [...(this.changedByCwd.get(cwd) ?? [])].filter((file) => this.isWithinCwd(cwd, file))
+    const removedFiles = [...(this.removedByCwd.get(cwd) ?? [])].filter((file) => this.isWithinCwd(cwd, file))
     return { changedFiles, removedFiles }
+  }
+
+  acknowledge(cwd: string, changedFiles: string[], removedFiles: string[]): void {
+    const changed = this.changedByCwd.get(cwd)
+    const removed = this.removedByCwd.get(cwd)
+    if (changed) {
+      for (const file of changedFiles) {
+        changed.delete(file)
+      }
+    }
+    if (removed) {
+      for (const file of removedFiles) {
+        removed.delete(file)
+      }
+    }
+  }
+
+  private getChangedSet(cwd: string): Set<string> {
+    const existing = this.changedByCwd.get(cwd)
+    if (existing) return existing
+    const created = new Set<string>()
+    this.changedByCwd.set(cwd, created)
+    return created
+  }
+
+  private getRemovedSet(cwd: string): Set<string> {
+    const existing = this.removedByCwd.get(cwd)
+    if (existing) return existing
+    const created = new Set<string>()
+    this.removedByCwd.set(cwd, created)
+    return created
   }
 
   private toRelative(cwd: string, filePath: string): string | null {
@@ -136,11 +178,4 @@ class TelemetryDeltaTracker {
   private isWithinCwd(cwd: string, relativePath: string): boolean {
     return relativePath.startsWith('./') && !relativePath.includes('..') && cwd.length > 0
   }
-}
-
-function normalizeRepoPath(input: string): string {
-  const cleaned = input.trim()
-  if (!cleaned) return cleaned
-  if (cleaned.startsWith('./')) return cleaned
-  return `./${cleaned}`
 }

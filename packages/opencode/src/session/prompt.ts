@@ -312,6 +312,7 @@ export namespace SessionPrompt {
         console.log("[INTELLIGENCE ENGINE] Harvesting telemetry state...")
         const telemetryState = await Telemetry.harvest(sessionID, promptText)
         await client.streamTelemetry(telemetryState)
+        Telemetry.markDelivered(telemetryState)
 
         console.log("[INTELLIGENCE ENGINE] Waiting for Execution Commands...")
         await client.streamCommands(async (cmd) => {
