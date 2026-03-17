@@ -24,6 +24,8 @@ message TelemetryState {
   repeated LspDiagnostic lsp_diagnostics = 5;
   string file_tree = 6;
   string uncommitted_diffs = 7;    // CRITICAL: The dirty state of the editor
+  repeated string changed_files = 8;
+  repeated string removed_files = 9;
 }
 
 message LspDiagnostic {

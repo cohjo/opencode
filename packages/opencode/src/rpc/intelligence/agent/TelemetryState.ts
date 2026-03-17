@@ -10,6 +10,8 @@ export interface TelemetryState {
   'lspDiagnostics'?: (_intelligence_agent_LspDiagnostic)[];
   'fileTree'?: (string);
   'uncommittedDiffs'?: (string);
+  'changedFiles'?: (string)[];
+  'removedFiles'?: (string)[];
 }
 
 export interface TelemetryState__Output {
@@ -20,4 +22,6 @@ export interface TelemetryState__Output {
   'lspDiagnostics'?: (_intelligence_agent_LspDiagnostic__Output)[];
   'fileTree'?: (string);
   'uncommittedDiffs'?: (string);
+  'changedFiles'?: (string)[];
+  'removedFiles'?: (string)[];
 }

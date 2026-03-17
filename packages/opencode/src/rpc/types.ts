@@ -6,6 +6,8 @@ export type TelemetryStateWire = {
   lsp_diagnostics: LspDiagnosticWire[]
   file_tree: string
   uncommitted_diffs: string
+  changed_files: string[]
+  removed_files: string[]
 }
 
 export type LspDiagnosticWire = {
