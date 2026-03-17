@@ -3,12 +3,13 @@ import fs from "fs/promises"
 import path from "path"
 import { promisify } from "util"
 import type { CommandResultWire, ToolCommandWire } from "./types"
+import { validateToolCommand } from "./validation"
 
 const execAsync = promisify(exec)
 
 export async function executeToolCommand(input: { sessionID: string; cmd: ToolCommandWire }): Promise<CommandResultWire> {
   const sessionID = input.sessionID
-  const cmd = input.cmd
+  const cmd = validateToolCommand(input.cmd)
   const commandID = cmd.command_id ?? ""
   const commandKind = cmd.command ?? ""
 
