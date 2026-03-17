@@ -89,7 +89,7 @@ function mapDiagnostic(filePath: string, diagnostic: LSPClient.Diagnostic): LspD
   }
 }
 
-class TelemetryDeltaTracker {
+export class TelemetryDeltaTracker {
   private changedByCwd = new Map<string, Set<string>>()
   private removedByCwd = new Map<string, Set<string>>()
   private subscribed = false
@@ -98,26 +98,11 @@ class TelemetryDeltaTracker {
     if (this.subscribed) return
     try {
       Bus.subscribe(FileWatcher.Event.Updated, ({ properties }) => {
-        const rel = this.toRelative(cwd, properties.file)
-        if (!rel) return
-        const changed = this.getChangedSet(cwd)
-        const removed = this.getRemovedSet(cwd)
-        if (properties.event === 'unlink') {
-          changed.delete(rel)
-          removed.add(rel)
-          return
-        }
-        removed.delete(rel)
-        changed.add(rel)
+        this.recordUpdate(cwd, properties.file, properties.event)
       })
 
       Bus.subscribe(LSPClient.Event.Diagnostics, ({ properties }) => {
-        const rel = this.toRelative(cwd, properties.path)
-        if (!rel) return
-        const changed = this.getChangedSet(cwd)
-        const removed = this.getRemovedSet(cwd)
-        removed.delete(rel)
-        changed.add(rel)
+        this.recordDiagnostic(cwd, properties.path)
       })
 
       this.subscribed = true
@@ -145,6 +130,31 @@ class TelemetryDeltaTracker {
         removed.delete(file)
       }
     }
+  }
+
+  recordUpdate(cwd: string, filePath: string, event: 'add' | 'change' | 'unlink'): void {
+    const rel = this.toRelative(cwd, filePath)
+    if (!rel) return
+
+    const changed = this.getChangedSet(cwd)
+    const removed = this.getRemovedSet(cwd)
+    if (event === 'unlink') {
+      changed.delete(rel)
+      removed.add(rel)
+      return
+    }
+    removed.delete(rel)
+    changed.add(rel)
+  }
+
+  recordDiagnostic(cwd: string, filePath: string): void {
+    const rel = this.toRelative(cwd, filePath)
+    if (!rel) return
+
+    const changed = this.getChangedSet(cwd)
+    const removed = this.getRemovedSet(cwd)
+    removed.delete(rel)
+    changed.add(rel)
   }
 
   private getChangedSet(cwd: string): Set<string> {
