@@ -1,6 +1,8 @@
 import { Instance } from '../project/instance'
+import { Bus } from '../bus'
+import { FileWatcher } from '../file/watcher'
 import { LSP } from '../lsp'
-import type { LSPClient } from '../lsp/client'
+import { LSPClient } from '../lsp/client'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 import type { LspDiagnosticWire, TelemetryStateWire } from './types'
@@ -8,6 +10,8 @@ import type { LspDiagnosticWire, TelemetryStateWire } from './types'
 const execAsync = promisify(exec)
 
 export class Telemetry {
+  private static tracker: TelemetryDeltaTracker | null = null
+
   static async harvest(sessionID: string, userPrompt: string): Promise<TelemetryStateWire> {
     let cwd = process.cwd()
     try {
@@ -29,18 +33,16 @@ export class Telemetry {
     }
 
     let uncommittedDiffs = ''
-    let changedFiles: string[] = []
-    let removedFiles: string[] = []
     try {
       const { stdout } = await execAsync('git diff', { cwd })
       uncommittedDiffs = stdout
-
-      const deltas = await collectGitFileDeltas(cwd)
-      changedFiles = deltas.changedFiles
-      removedFiles = deltas.removedFiles
     } catch {
       // Ignore if not a git repo or no diffs
     }
+
+    const tracker = Telemetry.getTracker()
+    tracker.ensureSubscribed(cwd)
+    const deltas = tracker.consume(cwd)
 
     let fileTree = ''
     try {
@@ -56,9 +58,16 @@ export class Telemetry {
       lsp_diagnostics: lspDiagnostics,
       file_tree: fileTree,
       uncommitted_diffs: uncommittedDiffs,
-      changed_files: changedFiles,
-      removed_files: removedFiles,
+      changed_files: deltas.changedFiles,
+      removed_files: deltas.removedFiles,
     }
+  }
+
+  private static getTracker(): TelemetryDeltaTracker {
+    if (!Telemetry.tracker) {
+      Telemetry.tracker = new TelemetryDeltaTracker()
+    }
+    return Telemetry.tracker
   }
 }
 
@@ -71,47 +80,61 @@ function mapDiagnostic(filePath: string, diagnostic: LSPClient.Diagnostic): LspD
   }
 }
 
-async function collectGitFileDeltas(cwd: string): Promise<{
-  changedFiles: string[]
-  removedFiles: string[]
-}> {
-  const changed = new Set<string>()
-  const removed = new Set<string>()
+class TelemetryDeltaTracker {
+  private changed = new Set<string>()
+  private removed = new Set<string>()
+  private subscribed = false
 
-  const { stdout } = await execAsync('git status --porcelain --untracked-files=all', { cwd })
-  for (const raw of stdout.split('\n')) {
-    const line = raw.trimEnd()
-    if (!line) continue
+  ensureSubscribed(cwd: string): void {
+    if (this.subscribed) return
+    try {
+      Bus.subscribe(FileWatcher.Event.Updated, ({ properties }) => {
+        const rel = this.toRelative(cwd, properties.file)
+        if (!rel) return
+        if (properties.event === 'unlink') {
+          this.changed.delete(rel)
+          this.removed.add(rel)
+          return
+        }
+        this.removed.delete(rel)
+        this.changed.add(rel)
+      })
 
-    if (line.startsWith('?? ')) {
-      changed.add(normalizeRepoPath(line.slice(3)))
-      continue
+      Bus.subscribe(LSPClient.Event.Diagnostics, ({ properties }) => {
+        const rel = this.toRelative(cwd, properties.path)
+        if (!rel) return
+        this.removed.delete(rel)
+        this.changed.add(rel)
+      })
+
+      this.subscribed = true
+    } catch {
+      // Bus may be unavailable outside normal instance context
     }
-
-    const status = line.slice(0, 2)
-    const payload = line.slice(3)
-    if (!payload) continue
-
-    if (payload.includes(' -> ')) {
-      const [fromPath, toPath] = payload.split(' -> ', 2)
-      if (status.includes('D')) {
-        removed.add(normalizeRepoPath(fromPath))
-      }
-      changed.add(normalizeRepoPath(toPath))
-      continue
-    }
-
-    if (status.includes('D')) {
-      removed.add(normalizeRepoPath(payload))
-      continue
-    }
-
-    changed.add(normalizeRepoPath(payload))
   }
 
-  return {
-    changedFiles: [...changed],
-    removedFiles: [...removed],
+  consume(cwd: string): { changedFiles: string[]; removedFiles: string[] } {
+    const changedFiles = [...this.changed].filter((file) => this.isWithinCwd(cwd, file))
+    const removedFiles = [...this.removed].filter((file) => this.isWithinCwd(cwd, file))
+    this.changed.clear()
+    this.removed.clear()
+    return { changedFiles, removedFiles }
+  }
+
+  private toRelative(cwd: string, filePath: string): string | null {
+    if (!filePath) return null
+    const normalized = filePath.replaceAll('\\', '/')
+    if (normalized.startsWith('./')) return normalized
+    if (normalized.startsWith('/')) {
+      if (!normalized.startsWith(cwd.replaceAll('\\', '/'))) return null
+      const rel = normalized.slice(cwd.length).replace(/^\//, '')
+      return rel ? `./${rel}` : null
+    }
+    return `./${normalized.replace(/^\.\//, '')}`
+  }
+
+  private isWithinCwd(cwd: string, relativePath: string): boolean {
+    return relativePath.startsWith('./') && !relativePath.includes('..') && cwd.length > 0
   }
 }
 
